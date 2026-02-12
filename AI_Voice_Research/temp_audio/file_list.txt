@@ -1,0 +1,5 @@
+file 'C:/ai-voice-research/AI_Voice_Research/temp_audio/chunk_001.mp3'
+file 'C:/ai-voice-research/AI_Voice_Research/temp_audio/chunk_002.mp3'
+file 'C:/ai-voice-research/AI_Voice_Research/temp_audio/chunk_003.mp3'
+file 'C:/ai-voice-research/AI_Voice_Research/temp_audio/chunk_004.mp3'
+file 'C:/ai-voice-research/AI_Voice_Research/temp_audio/chunk_005.mp3'
