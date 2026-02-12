@@ -1,13 +1,11 @@
 import os
 import re
-import asyncio
 import pdfplumber
-import edge_tts
+from gtts import gTTS
 from flask import Flask, render_template, request, send_file, jsonify
 from werkzeug.utils import secure_filename
 from datetime import datetime
 import traceback
-import time
 
 app = Flask(__name__)
 
@@ -22,12 +20,6 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
-
-# Voice settings
-VOICE = "en-US-JennyNeural"
-RATE = "+0%"  # Faster speech
-VOLUME = "+0%"
-PITCH = "+0Hz"
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -64,50 +56,27 @@ def extract_text_from_pdf(pdf_path):
     print(f"Extracted {len(text)} characters")
     return text.strip()
 
-async def text_to_speech_with_retry(text, output_file, max_retries=3):
+def text_to_speech(text, output_file):
     """
-    Convert text to speech with retry logic
+    Convert text to speech using Google TTS
     """
-    print(f"Generating audio to: {output_file}")
+    print(f"Generating audio with gTTS to: {output_file}")
     
-    for attempt in range(max_retries):
-        try:
-            print(f"Attempt {attempt + 1}/{max_retries}")
-            
-            # Add a small delay between retries
-            if attempt > 0:
-                wait_time = attempt * 2
-                print(f"Waiting {wait_time} seconds before retry...")
-                await asyncio.sleep(wait_time)
-            
-            # Create communicate object with timeout
-            communicate = edge_tts.Communicate(
-                text, 
-                VOICE, 
-                rate=RATE, 
-                volume=VOLUME, 
-                pitch=PITCH
-            )
-            
-            # Save with timeout
-            await asyncio.wait_for(communicate.save(output_file), timeout=300)
-            
-            print(f"Audio generated successfully on attempt {attempt + 1}")
-            return True
-            
-        except asyncio.TimeoutError:
-            print(f"Timeout on attempt {attempt + 1}")
-            if attempt == max_retries - 1:
-                raise Exception("Audio generation timed out after multiple attempts")
-                
-        except Exception as e:
-            print(f"Error on attempt {attempt + 1}: {str(e)}")
-            if attempt == max_retries - 1:
-                raise Exception(f"Failed after {max_retries} attempts: {str(e)}")
-    
-    return False
+    try:
+        # Create gTTS object
+        tts = gTTS(text=text, lang='en', slow=False)
+        
+        # Save to file
+        tts.save(output_file)
+        
+        print(f"Audio generated successfully!")
+        return True
+        
+    except Exception as e:
+        print(f"gTTS Error: {str(e)}")
+        raise
 
-async def process_pdf(pdf_path, output_filename):
+def process_pdf(pdf_path, output_filename):
     """Main processing function"""
     try:
         # Extract text
@@ -120,8 +89,8 @@ async def process_pdf(pdf_path, output_filename):
         print("Step 2: Cleaning text...")
         cleaned_text = clean_text(raw_text)
         
-        # Limit text length for free tier (prevent timeouts)
-        max_chars = 50000  # About 10-15 pages
+        # Limit text length
+        max_chars = 50000
         if len(cleaned_text) > max_chars:
             print(f"Warning: Text too long ({len(cleaned_text)} chars), truncating to {max_chars}")
             cleaned_text = cleaned_text[:max_chars] + "..."
@@ -130,8 +99,7 @@ async def process_pdf(pdf_path, output_filename):
         print("Step 3: Generating audio...")
         final_output = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
         
-        # Use retry logic
-        await text_to_speech_with_retry(cleaned_text, final_output)
+        text_to_speech(cleaned_text, final_output)
         
         print(f"SUCCESS! Output saved to: {final_output}")
         return final_output
@@ -178,7 +146,7 @@ def upload_file():
         
         # Process PDF
         print("Starting PDF processing...")
-        output_path = asyncio.run(process_pdf(pdf_path, output_filename))
+        output_path = process_pdf(pdf_path, output_filename)
         
         # Clean up uploaded PDF
         try:
@@ -213,8 +181,7 @@ def download_file(filename):
 def test():
     return jsonify({
         'status': 'Server is running!',
-        'voice': VOICE,
-        'rate': RATE,
+        'tts_engine': 'Google TTS',
         'folders_exist': {
             'uploads': os.path.exists(UPLOAD_FOLDER),
             'outputs': os.path.exists(OUTPUT_FOLDER),
@@ -225,14 +192,11 @@ if __name__ == '__main__':
     print("=" * 60)
     print("🎙️  AI Voice Research - PDF to Speech Server")
     print("=" * 60)
-    print("✅ Direct audio generation with retry logic!")
+    print("✅ Using Google TTS - No API limits!")
     print(f"📁 Upload folder: {os.path.abspath(UPLOAD_FOLDER)}")
     print(f"📁 Output folder: {os.path.abspath(OUTPUT_FOLDER)}")
-    print(f"🗣️  Voice: {VOICE}")
-    print(f"⚡ Rate: {RATE}")
     print("=" * 60)
     
-    # Use PORT from environment variable for deployment
     port = int(os.environ.get('PORT', 5000))
     print(f"🌐 Server running on port: {port}")
     print("=" * 60)
