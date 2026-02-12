@@ -7,6 +7,7 @@ from flask import Flask, render_template, request, send_file, jsonify
 from werkzeug.utils import secure_filename
 from datetime import datetime
 import traceback
+import time
 
 app = Flask(__name__)
 
@@ -23,8 +24,8 @@ app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
 
 # Voice settings
-VOICE = "en-US-AriaNeural"
-RATE = "+0%"
+VOICE = "en-US-JennyNeural"
+RATE = "+0%"  # Faster speech
 VOLUME = "+0%"
 PITCH = "+0Hz"
 
@@ -63,21 +64,51 @@ def extract_text_from_pdf(pdf_path):
     print(f"Extracted {len(text)} characters")
     return text.strip()
 
-async def text_to_speech_direct(text, output_file):
+async def text_to_speech_with_retry(text, output_file, max_retries=3):
     """
-    Convert text to speech directly - NO CHUNKING!
-    This creates ONE audio file without needing ffmpeg
+    Convert text to speech with retry logic
     """
-    print(f"Generating audio directly to: {output_file}")
+    print(f"Generating audio to: {output_file}")
     
-    # Edge TTS can handle long text directly
-    communicate = edge_tts.Communicate(text, VOICE, rate=RATE, volume=VOLUME, pitch=PITCH)
-    await communicate.save(output_file)
+    for attempt in range(max_retries):
+        try:
+            print(f"Attempt {attempt + 1}/{max_retries}")
+            
+            # Add a small delay between retries
+            if attempt > 0:
+                wait_time = attempt * 2
+                print(f"Waiting {wait_time} seconds before retry...")
+                await asyncio.sleep(wait_time)
+            
+            # Create communicate object with timeout
+            communicate = edge_tts.Communicate(
+                text, 
+                VOICE, 
+                rate=RATE, 
+                volume=VOLUME, 
+                pitch=PITCH
+            )
+            
+            # Save with timeout
+            await asyncio.wait_for(communicate.save(output_file), timeout=300)
+            
+            print(f"Audio generated successfully on attempt {attempt + 1}")
+            return True
+            
+        except asyncio.TimeoutError:
+            print(f"Timeout on attempt {attempt + 1}")
+            if attempt == max_retries - 1:
+                raise Exception("Audio generation timed out after multiple attempts")
+                
+        except Exception as e:
+            print(f"Error on attempt {attempt + 1}: {str(e)}")
+            if attempt == max_retries - 1:
+                raise Exception(f"Failed after {max_retries} attempts: {str(e)}")
     
-    print(f"Audio generated successfully!")
+    return False
 
 async def process_pdf(pdf_path, output_filename):
-    """Main processing function - NO CHUNKING, NO FFMPEG NEEDED!"""
+    """Main processing function"""
     try:
         # Extract text
         print("Step 1: Extracting text...")
@@ -89,12 +120,18 @@ async def process_pdf(pdf_path, output_filename):
         print("Step 2: Cleaning text...")
         cleaned_text = clean_text(raw_text)
         
-        # Generate audio DIRECTLY - no chunking!
-        print("Step 3: Generating audio (this may take a few minutes)...")
+        # Limit text length for free tier (prevent timeouts)
+        max_chars = 50000  # About 10-15 pages
+        if len(cleaned_text) > max_chars:
+            print(f"Warning: Text too long ({len(cleaned_text)} chars), truncating to {max_chars}")
+            cleaned_text = cleaned_text[:max_chars] + "..."
+        
+        # Generate audio
+        print("Step 3: Generating audio...")
         final_output = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
         
-        # Create audio file in one go - no ffmpeg needed!
-        await text_to_speech_direct(cleaned_text, final_output)
+        # Use retry logic
+        await text_to_speech_with_retry(cleaned_text, final_output)
         
         print(f"SUCCESS! Output saved to: {final_output}")
         return final_output
@@ -140,7 +177,7 @@ def upload_file():
         output_filename = f"{timestamp}_audiobook.mp3"
         
         # Process PDF
-        print("Starting PDF processing (NO FFMPEG NEEDED)...")
+        print("Starting PDF processing...")
         output_path = asyncio.run(process_pdf(pdf_path, output_filename))
         
         # Clean up uploaded PDF
@@ -176,7 +213,8 @@ def download_file(filename):
 def test():
     return jsonify({
         'status': 'Server is running!',
-        'ffmpeg_required': 'NO - Using direct audio generation!',
+        'voice': VOICE,
+        'rate': RATE,
         'folders_exist': {
             'uploads': os.path.exists(UPLOAD_FOLDER),
             'outputs': os.path.exists(OUTPUT_FOLDER),
@@ -187,12 +225,16 @@ if __name__ == '__main__':
     print("=" * 60)
     print("🎙️  AI Voice Research - PDF to Speech Server")
     print("=" * 60)
-    print("✅ NO FFMPEG REQUIRED - Direct audio generation!")
+    print("✅ Direct audio generation with retry logic!")
     print(f"📁 Upload folder: {os.path.abspath(UPLOAD_FOLDER)}")
     print(f"📁 Output folder: {os.path.abspath(OUTPUT_FOLDER)}")
     print(f"🗣️  Voice: {VOICE}")
-    print("=" * 60)
-    print("🌐 Server: http://localhost:5000")
+    print(f"⚡ Rate: {RATE}")
     print("=" * 60)
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Use PORT from environment variable for deployment
+    port = int(os.environ.get('PORT', 5000))
+    print(f"🌐 Server running on port: {port}")
+    print("=" * 60)
+    
+    app.run(debug=False, host='0.0.0.0', port=port)
