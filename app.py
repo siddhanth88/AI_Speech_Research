@@ -1,11 +1,14 @@
 import os
 import re
+import json
+import traceback
+
 import pdfplumber
+import requests
 from gtts import gTTS
-from flask import Flask, render_template, request, send_file, jsonify
+from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 from datetime import datetime
-import traceback
 
 app = Flask(__name__)
 
@@ -58,6 +61,71 @@ def extract_pdf_text(pdf_path):
                 text += joined
     
     return text
+
+
+def build_strategy_evidence(text):
+    """
+    Scan the entire extracted PDF text and build a compact, high-signal evidence
+    set for the LLM. This avoids token overruns while still reflecting the full
+    document.
+    """
+    # Normalize whitespace early
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Split into sentence-like chunks
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+
+    keywords = [
+        # Flows / positioning
+        "retail", "sip", "flows", "flow", "inflows", "outflows", "positioning",
+        # Estimates / fundamentals
+        "earnings", "eps", "revenue", "sales", "margin", "margins", "guidance",
+        "estimate", "estimates", "revision", "revisions", "cut", "cuts", "raise", "raised",
+        "downgrade", "upgrade", "consensus",
+        # Valuation / pricing
+        "valuation", "valuations", "multiple", "p/e", "pe ", "p/b", "pb ", "ev/ebitda", "rerating",
+        "fair value", "target price", "tp ", "price target", "multiple compression",
+        "dislocation", "disconnect", "dispersion", "compression",
+        # Risks / credibility
+        "execution", "credibility", "visibility", "pipeline", "risk", "drawdown",
+        # Forward-looking
+        "forward", "outlook", "looking ahead", "ahead", "scenario", "base case",
+    ]
+
+    def is_high_signal(s):
+        sl = s.lower()
+        if len(s) < 40:
+            return False
+        if any(k in sl for k in keywords):
+            return True
+        # numeric / valuation evidence
+        if re.search(r"\d", s) and re.search(r"(%|percent|bps|basis|₹|rs\.?|\$|usd|crore|lakh|billion|million|trillion|x\b)", sl):
+            return True
+        return False
+
+    picked = []
+    seen = set()
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        if not is_high_signal(s):
+            continue
+        # Deduplicate on lowercase prefix to keep variety
+        key = s.lower()[:120]
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append(s)
+        if len(picked) >= 140:
+            break
+
+    # If the doc is sparse, fall back to the first portion so we still have context
+    if len(picked) < 25:
+        picked = [s for s in sentences[:80] if len(s.strip()) >= 30]
+
+    evidence = "\n".join(f"- {s}" for s in picked)
+    return evidence
 
 def is_boilerplate(text):
     """Filter out ONLY obvious disclaimers - more lenient"""
@@ -210,59 +278,244 @@ def extract_insights(text):
     
     return insights
 
-def generate_audio(insights):
-    """Generate comprehensive audio summary"""
-    summary_parts = []
-    
-    summary_parts.append("Here is a summary of the research report.")
-    
-    # Policy Decisions
-    if insights["policy_decisions"]:
-        summary_parts.append("Policy decisions.")
-        summary_parts.extend(insights["policy_decisions"][:3])
-    
-    # Executive Summary
-    if insights["executive_summary"]:
-        summary_parts.append("Key highlights.")
-        summary_parts.extend(insights["executive_summary"][:3])
-    
-    # Forecasts
-    if insights["forecasts"]:
-        summary_parts.append("Forecasts and projections.")
-        summary_parts.extend(insights["forecasts"][:3])
-    
-    # Market Outlook
-    if insights["market_outlook"]:
-        summary_parts.append("Market outlook.")
-        summary_parts.extend(insights["market_outlook"][:2])
-    
-    # Key Findings
-    if insights["key_findings"]:
-        summary_parts.append("Key findings.")
-        summary_parts.extend(insights["key_findings"][:3])
-    
-    # Conclusions
-    if insights["conclusions"]:
-        summary_parts.append("Conclusions.")
-        summary_parts.extend(insights["conclusions"][:2])
-    
-    # Join and clean for speech
-    summary = " ".join(summary_parts)
-    summary = summary.replace('%', ' percent ')
-    summary = summary.replace('₹', ' rupees ')
-    summary = summary.replace('Rs', ' rupees')
-    summary = summary.replace('bps', ' basis points')
-    summary = summary.replace('FY', ' financial year ')
-    
-    # Generate audio
-    audio_path = os.path.join(AUDIO_FOLDER, "summary.mp3")
-    
+
+def generate_market_outlook_summary(report_text):
+    """
+    Use an LLM (via Groq API) to transform the raw report text into a highly
+    structured, valuation-relevant equity research outlook plus an audio-ready
+    script. The function expects GROQ_API_KEY to be set in the env.
+    """
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GROQ_API_KEY environment variable is not set. "
+            "Set it to your Groq API key to enable the Market Outlook analyzer."
+        )
+
+    # Build a compact evidence pack from the *entire* document so we can stay
+    # within Groq token limits while still reflecting the full PDF.
+    evidence = build_strategy_evidence(report_text)
+
+    system_prompt = """
+You are a senior institutional equity strategist and valuation analyst.
+You are analyzing a full professional research report.
+Your objective is to synthesize the ENTIRE document into a high-conviction, investment-committee-grade briefing.
+Think like a sell-side strategist presenting to portfolio managers.
+
+STRICT RULES:
+1. Identify the CENTRAL THESIS of the report in one sharp sentence.
+2. Detect and quantify (ONLY if explicitly stated):
+   - EPS revisions
+   - Revenue revisions
+   - Margin guidance changes
+   - Multiple changes
+   - Fair value / target price revisions
+3. Explicitly assess:
+   - Execution risk
+   - Valuation compression risk
+   - Flow sensitivity risk
+   - Estimate credibility risk
+4. Remove duplication.
+5. Eliminate generic commentary.
+6. Avoid weak language such as: "may impact sentiment", "could affect", "important to monitor".
+7. Do NOT give textbook advice (e.g., diversification).
+8. Do NOT hallucinate numbers not present in the report.
+
+Every bullet MUST:
+- Introduce new information
+- Include a valuation or market implication (why it matters)
+- Be analytical, not descriptive
+
+OUTPUT STRUCTURE (return as JSON fields):
+SECTION 1 — Central Thesis (1 sentence max)
+SECTION 2 — Estimate & Valuation Reset (3–4 bullets; fewer if not supported)
+Focus strictly on:
+- EPS revisions / revenue revisions / margin changes / multiple changes / fair value implications
+SECTION 3 — Structural & Execution Risk (max 3 bullets)
+Each bullet MUST start with a risk label: "Elevated:", "Moderate:", or "Contained:"
+SECTION 4 — Market Vulnerability Assessment
+Return levels exactly as Low / Moderate / High and a score X/10:
+- Earnings Risk Level
+- Valuation Compression Risk
+- Flow Sensitivity Risk
+- Overall Vulnerability Score
+SECTION 5 — Strategic Investment Stance (2–3 sentences max)
+Use one of: Constructive / Neutral / Cautious / Defensive. Explain what must change for re-rating.
+
+Tone: Authoritative, institutional, high conviction, concise. No filler. No repetition. No macro template unless directly valuation-relevant.
+
+Return ONLY valid JSON with this exact structure and nothing else:
+{
+  "central_thesis": "one sentence",
+  "estimate_valuation_reset": ["bullet 1", "bullet 2", "bullet 3", "bullet 4"],
+  "structural_execution_risk": ["Elevated: ...", "Moderate: ...", "Contained: ..."],
+  "market_vulnerability_assessment": {
+    "earnings_risk_level": "Low|Moderate|High",
+    "valuation_compression_risk": "Low|Moderate|High",
+    "flow_sensitivity_risk": "Low|Moderate|High",
+    "overall_vulnerability_score": 0
+  },
+  "strategic_investment_stance": "2-3 sentences",
+  "audio_script": "Audio-ready script (<= ~2.5 minutes) that narrates the full briefing in a natural institutional tone."
+}
+
+If a field lacks material report-backed content, keep it short/blank rather than filling with generic language.
+"""
+
+    payload = {
+        # Groq exposes an OpenAI-compatible Chat Completions API.
+        # Use a currently supported general-purpose Llama model.
+        "model": "llama-3.3-70b-versatile",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    "Below is an evidence pack extracted from the full strategy report. "
+                    "Apply the above instructions strictly and return ONLY the JSON object.\n\n"
+                    f"{evidence}"
+                ),
+            },
+        ],
+        "temperature": 0.2,
+        # Ask the model to return strict JSON; Groq supports OpenAI-style response_format.
+        "response_format": {"type": "json_object"},
+    }
+
     try:
-        tts = gTTS(summary, lang="en", tld="co.uk")
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=90,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Failed to contact Groq API: {exc}") from exc
+
+    # Handle HTTP errors (including 429 rate limits) explicitly
+    if response.status_code == 429:
+        raise RuntimeError(
+            "Groq API rate limit or quota exceeded. "
+            "Please wait a bit and try again, or use a different API key / account."
+        )
+
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        # Surface a concise error for other HTTP failures
+        raise RuntimeError(
+            f"Groq API returned an error ({response.status_code}): {response.text[:300]}"
+        ) from exc
+    content = response.json()["choices"][0]["message"]["content"].strip()
+
+    # Parse JSON returned by the model
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        # Fallback: try to extract the first top-level JSON object from the text
+        start = content.find("{")
+        end = content.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                data = json.loads(content[start : end + 1])
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("Model output was not valid JSON. Please try again.") from exc
+        else:
+            raise RuntimeError("Model output was not valid JSON. Please try again.")
+
+    # Normalise expected fields
+    def _strip_index_names(s):
+        sl = s.lower()
+        if "nifty" in sl or "sensex" in sl:
+            return ""
+        return s.strip()
+
+    data["central_thesis"] = _strip_index_names(str(data.get("central_thesis", "") or ""))
+
+    list_keys = ["estimate_valuation_reset", "structural_execution_risk"]
+    for key in list_keys:
+        value = data.get(key, [])
+        if not isinstance(value, list):
+            value = [str(value)]
+        cleaned = []
+        for item in value:
+            t = _strip_index_names(str(item))
+            if t:
+                cleaned.append(t)
+        data[key] = cleaned
+
+    mva = data.get("market_vulnerability_assessment", {}) or {}
+    if not isinstance(mva, dict):
+        mva = {}
+    data["market_vulnerability_assessment"] = {
+        "earnings_risk_level": str(mva.get("earnings_risk_level", "Moderate")),
+        "valuation_compression_risk": str(mva.get("valuation_compression_risk", "Moderate")),
+        "flow_sensitivity_risk": str(mva.get("flow_sensitivity_risk", "Moderate")),
+        "overall_vulnerability_score": mva.get("overall_vulnerability_score", 5),
+    }
+
+    data["strategic_investment_stance"] = _strip_index_names(
+        str(data.get("strategic_investment_stance", "") or "")
+    )
+
+    audio_script = data.get("audio_script", "")
+    if isinstance(audio_script, list):
+        audio_script = " ".join(str(x) for x in audio_script)
+    data["audio_script"] = _strip_index_names(str(audio_script or ""))
+
+    return data
+
+def generate_market_outlook_audio(summary_dict):
+    """
+    Generate a spoken macro market outlook from the structured JSON output
+    using gTTS. This is tailored to the 5-section committee format.
+    """
+    # Prefer the model-crafted audio script when available
+    text = (summary_dict.get("audio_script") or "").strip()
+
+    # Fallback: build a script from bullets if audio_script is missing
+    if not text:
+        sections_order = [
+            ("market_outlook_executive", "Executive earnings and valuation view."),
+            ("positive_drivers", "Key positive drivers for earnings and valuation."),
+            ("key_risks", "Key risks to earnings, margins, and valuation."),
+            ("what_matters_most", "What matters most and could change the base case."),
+            ("strategic_conclusion", "Strategic conclusion and stance."),
+        ]
+
+        parts = [
+            "Here is a concise, valuation-focused research summary for the investment committee."
+        ]
+
+        for key, heading in sections_order:
+            items = summary_dict.get(key) or []
+            if not items:
+                continue
+            parts.append(heading)
+            # Keep audio concise: at most 6 bullets per section
+            for bullet in items[:6]:
+                parts.append(bullet)
+
+        text = " ".join(parts)
+
+    # Clean a few symbols so TTS sounds natural
+    text = text.replace("%", " percent ")
+    text = text.replace("bps", " basis points")
+    text = text.replace("Rs", " rupees")
+    text = text.replace("₹", " rupees ")
+    text = text.replace("FY", " financial year ")
+
+    audio_path = os.path.join(AUDIO_FOLDER, "market_outlook_summary.mp3")
+
+    try:
+        tts = gTTS(text, lang="en", tld="co.uk")
         tts.save(audio_path)
-        return "/static/audio/summary.mp3"
-    except Exception as e:
-        print(f"Audio error: {e}")
+        return "/static/audio/market_outlook_summary.mp3"
+    except Exception as exc:
+        print(f"Audio generation error: {exc}")
         return None
 
 @app.route("/", methods=["GET", "POST"])
@@ -294,19 +547,16 @@ def index():
             # Extract and analyze
             raw_text = extract_pdf_text(pdf_path)
             print(f"📝 Extracted {len(raw_text)} characters from PDF")
-            
-            data = extract_insights(raw_text)
-            
-            # Print extraction stats
-            total_insights = sum(len(v) for v in data.values())
-            print(f"✅ Extracted {total_insights} total insights:")
-            for category, items in data.items():
-                if items:
-                    print(f"   - {category}: {len(items)} items")
-            
-            # Generate audio if content exists
-            if any(data.values()):
-                audio_file = generate_audio(data)
+
+            # Use LLM to generate the macro Market Outlook structure
+            data = generate_market_outlook_summary(raw_text)
+
+            # Generate audio if we got any bullets back
+            if data:
+                try:
+                    audio_file = generate_market_outlook_audio(data)
+                except Exception as exc:
+                    print(f"Failed to generate audio: {exc}")
             
             # Cleanup
             try:

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Research Paper Analyzer</title>
+    <title>Research Market Outlook Analyzer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
@@ -155,50 +155,109 @@
             font-weight: 700;
             color: #2f6fed;
         }
+
+        .section-actions {
+            margin-top: 10px;
+            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .secondary-button {
+            background-color: #e5e7eb;
+            color: #111827;
+        }
+
+        .secondary-button:hover {
+            background-color: #d1d5db;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.65);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .loading-box {
+            background: #ffffff;
+            padding: 20px 24px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .spinner {
+            width: 28px;
+            height: 28px;
+            border-radius: 999px;
+            border: 3px solid #e5e7eb;
+            border-top-color: #2f6fed;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
 
-    <h1>📊 Research Paper Analyzer</h1>
+    <h1>📊 Research Market Outlook Analyzer</h1>
 
     <div class="upload-card">
-        <form method="POST" enctype="multipart/form-data">
+        <form id="upload-form" method="POST" enctype="multipart/form-data">
             <div class="upload-row">
                 <input type="file" name="pdf" accept=".pdf" required>
-                <button type="submit">Upload & Analyze</button>
+                <button id="analyze-button" type="submit">Upload & Analyze</button>
             </div>
         </form>
 
         {% if data %}
         <div class="alert-success">
-            ✅ Analysis complete. Comprehensive insights extracted from entire document.
+            ✅ Analysis complete. Structured research market outlook generated for the full report.
             
             <div class="stats">
-                {% set total = data.policy_decisions|length + data.executive_summary|length + data.key_findings|length + data.data_points|length + data.market_outlook|length + data.forecasts|length + data.conclusions|length %}
+                {% set total = data.estimate_valuation_reset|length + data.structural_execution_risk|length %}
                 <div class="stat-box">
                     <div class="stat-number">{{ total }}</div>
-                    <div>Total Insights</div>
+                    <div>Total Bullets</div>
                 </div>
-                {% if data.policy_decisions %}
+                {% if data.market_vulnerability_assessment %}
                 <div class="stat-box">
-                    <div class="stat-number">{{ data.policy_decisions|length }}</div>
-                    <div>Policy Decisions</div>
+                    <div class="stat-number">{{ data.market_vulnerability_assessment.overall_vulnerability_score }}/10</div>
+                    <div>Vulnerability</div>
                 </div>
                 {% endif %}
-                {% if data.forecasts %}
+                {% if data.estimate_valuation_reset %}
                 <div class="stat-box">
-                    <div class="stat-number">{{ data.forecasts|length }}</div>
-                    <div>Forecasts</div>
+                    <div class="stat-number">{{ data.estimate_valuation_reset|length }}</div>
+                    <div>Reset</div>
                 </div>
                 {% endif %}
-                {% if data.data_points %}
+                {% if data.structural_execution_risk %}
                 <div class="stat-box">
-                    <div class="stat-number">{{ data.data_points|length }}</div>
-                    <div>Data Points</div>
+                    <div class="stat-number">{{ data.structural_execution_risk|length }}</div>
+                    <div>Risks</div>
                 </div>
                 {% endif %}
+
+                <div class="stat-box">
+                    <button id="download-md" class="secondary-button" type="button">Download Markdown</button>
+                </div>
+                <div class="stat-box">
+                    <button id="download-doc" class="secondary-button" type="button">Download Word (.doc)</button>
+                </div>
             </div>
         </div>
         {% endif %}
@@ -212,109 +271,88 @@
 
     {% if data %}
 
-    <!-- Policy Decisions -->
-    {% if data.policy_decisions %}
-    <div class="section-card">
-        <div class="section-title">🏛️ Policy Decisions</div>
-        <span class="badge badge-policy">Central Bank Actions</span>
+    <!-- SECTION 1 — Central Thesis -->
+    {% if data.central_thesis %}
+    <div class="section-card" data-section-title="Central Thesis">
+        <div class="section-title">🧠 Central Thesis</div>
+        <span class="badge">1 sentence</span>
+        <div class="section-actions">
+            <button type="button" class="secondary-button copy-section">Copy Section</button>
+        </div>
+        <p class="export-text" style="margin:0; line-height:1.7; color:#111827;">{{ data.central_thesis }}</p>
+    </div>
+    {% endif %}
 
+    <!-- SECTION 2 — Estimate & Valuation Reset -->
+    {% if data.estimate_valuation_reset %}
+    <div class="section-card" data-section-title="Estimate & Valuation Reset">
+        <div class="section-title">📉 Estimate & Valuation Reset</div>
+        <span class="badge badge-forecast">EPS / Revenue / Margin / Multiple / Fair Value</span>
+        <div class="section-actions">
+            <button type="button" class="secondary-button copy-section">Copy Section</button>
+        </div>
         <ul>
-            {% for item in data.policy_decisions %}
+            {% for item in data.estimate_valuation_reset %}
                 <li>{{ item }}</li>
             {% endfor %}
         </ul>
     </div>
     {% endif %}
 
-    <!-- Forecasts & Projections -->
-    {% if data.forecasts %}
-    <div class="section-card">
-        <div class="section-title">📊 Forecasts & Projections</div>
-        <span class="badge badge-forecast">Future Estimates</span>
-
+    <!-- SECTION 3 — Structural & Execution Risk -->
+    {% if data.structural_execution_risk %}
+    <div class="section-card" data-section-title="Structural & Execution Risk">
+        <div class="section-title">⚠️ Structural & Execution Risk</div>
+        <span class="badge badge-policy">Elevated / Moderate / Contained</span>
+        <div class="section-actions">
+            <button type="button" class="secondary-button copy-section">Copy Section</button>
+        </div>
         <ul>
-            {% for item in data.forecasts %}
+            {% for item in data.structural_execution_risk %}
                 <li>{{ item }}</li>
             {% endfor %}
         </ul>
     </div>
     {% endif %}
 
-    <!-- Market Outlook -->
-    {% if data.market_outlook %}
-    <div class="section-card">
-        <div class="section-title">🔮 Market Outlook</div>
-        <span class="badge badge-outlook">Forward Looking</span>
-
+    <!-- SECTION 4 — Market Vulnerability Assessment -->
+    {% if data.market_vulnerability_assessment %}
+    <div class="section-card" data-section-title="Market Vulnerability Assessment">
+        <div class="section-title">🧯 Market Vulnerability Assessment</div>
+        <span class="badge">Risk levels + score</span>
+        <div class="section-actions">
+            <button type="button" class="secondary-button copy-section">Copy Section</button>
+        </div>
         <ul>
-            {% for item in data.market_outlook %}
-                <li>{{ item }}</li>
-            {% endfor %}
+            <li><strong>Earnings Risk Level</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.earnings_risk_level }}</span></li>
+            <li><strong>Valuation Compression Risk</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.valuation_compression_risk }}</span></li>
+            <li><strong>Flow Sensitivity Risk</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.flow_sensitivity_risk }}</span></li>
+            <li><strong>Overall Vulnerability Score</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.overall_vulnerability_score }}/10</span></li>
         </ul>
     </div>
     {% endif %}
 
-    <!-- Executive Summary -->
-    {% if data.executive_summary %}
-    <div class="section-card">
-        <div class="section-title">⭐ Key Highlights</div>
-        <span class="badge">Important Points</span>
-
-        <ul>
-            {% for item in data.executive_summary %}
-                <li>{{ item }}</li>
-            {% endfor %}
-        </ul>
+    <!-- SECTION 5 — Strategic Investment Stance -->
+    {% if data.strategic_investment_stance %}
+    <div class="section-card" data-section-title="Strategic Investment Stance">
+        <div class="section-title">🏁 Strategic Investment Stance</div>
+        <span class="badge">Constructive / Neutral / Cautious / Defensive</span>
+        <div class="section-actions">
+            <button type="button" class="secondary-button copy-section">Copy Section</button>
+        </div>
+        <p class="export-text" style="margin:0; line-height:1.7; color:#111827;">{{ data.strategic_investment_stance }}</p>
     </div>
     {% endif %}
 
-    <!-- Key Findings -->
-    {% if data.key_findings %}
-    <div class="section-card">
-        <div class="section-title">🧠 Key Findings</div>
-        <span class="badge">Analysis & Insights</span>
-
-        <ul>
-            {% for item in data.key_findings %}
-                <li>{{ item }}</li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
-
-    <!-- Data Points -->
-    {% if data.data_points %}
-    <div class="section-card">
-        <div class="section-title">📈 Key Data Points</div>
-        <span class="badge">Quantitative Metrics</span>
-
-        <ul>
-            {% for item in data.data_points %}
-                <li>{{ item }}</li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
-
-    <!-- Conclusions -->
-    {% if data.conclusions %}
-    <div class="section-card">
-        <div class="section-title">📌 Conclusions</div>
-        <span class="badge">Summary</span>
-
-        <ul>
-            {% for item in data.conclusions %}
-                <li>{{ item }}</li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
-
-    <!-- Audio -->
     {% if audio %}
-    <div class="section-card">
+    <div class="section-card" data-section-title="Audio Ready Script (Narration)">
         <div class="section-title">🔊 Audio Summary</div>
-        <audio controls>
+        <span class="badge">gTTS – UK English Voice</span>
+        <div class="section-actions">
+            <button type="button" class="secondary-button copy-section">Copy Section</button>
+        </div>
+        <p class="export-text" style="margin:0 0 12px 0; line-height:1.7; color:#111827;">{{ data.audio_script }}</p>
+        <audio controls style="margin-top:10px; width:100%;">
             <source src="{{ audio }}" type="audio/mpeg">
             Your browser does not support the audio element.
         </audio>
@@ -324,6 +362,140 @@
     {% endif %}
 
 </div>
+
+<div id="loading-overlay" class="loading-overlay">
+    <div class="loading-box">
+        <div class="spinner"></div>
+        <div>
+            <div style="font-weight:600; margin-bottom:4px;">Analyzing report…</div>
+            <div style="font-size:14px; color:#4b5563;">Extracting macro market outlook and investment takeaways.</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const form = document.getElementById('upload-form');
+        const analyzeButton = document.getElementById('analyze-button');
+        const overlay = document.getElementById('loading-overlay');
+
+        if (form && analyzeButton && overlay) {
+            form.addEventListener('submit', function () {
+                overlay.style.display = 'flex';
+                analyzeButton.disabled = true;
+                analyzeButton.textContent = 'Analyzing…';
+            });
+        }
+
+        function exportLinesFromCard(card) {
+            const title = card.getAttribute('data-section-title') || '';
+            const lines = [];
+            if (title) {
+                lines.push('## ' + title);
+            }
+
+            const items = card.querySelectorAll('ul li');
+            if (items && items.length) {
+                items.forEach(function (li) {
+                    lines.push('- ' + li.textContent.trim());
+                });
+                return lines;
+            }
+
+            const texts = card.querySelectorAll('.export-text');
+            if (texts && texts.length) {
+                texts.forEach(function (el) {
+                    const t = (el.textContent || '').trim();
+                    if (t) lines.push(t);
+                });
+            }
+
+            return lines;
+        }
+
+        function buildMarkdownFromSections() {
+            const sections = document.querySelectorAll('.section-card');
+            const lines = ['# Research Market Outlook'];
+
+            sections.forEach(function (card) {
+                const title = card.getAttribute('data-section-title') || '';
+                if (!title) return;
+                lines.push('');
+                exportLinesFromCard(card).forEach(function (l) {
+                    lines.push(l);
+                });
+            });
+
+            return lines.join('\n');
+        }
+
+        function downloadText(filename, content, mimeType) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        const downloadMdBtn = document.getElementById('download-md');
+        if (downloadMdBtn) {
+            downloadMdBtn.addEventListener('click', function () {
+                const md = buildMarkdownFromSections();
+                downloadText('macro_market_outlook.md', md, 'text/markdown;charset=utf-8');
+            });
+        }
+
+        const downloadDocBtn = document.getElementById('download-doc');
+        if (downloadDocBtn) {
+            downloadDocBtn.addEventListener('click', function () {
+                const md = buildMarkdownFromSections();
+                // Plain text with .doc extension; opens directly in Word
+                downloadText('macro_market_outlook.doc', md, 'application/msword');
+            });
+        }
+
+        document.querySelectorAll('.copy-section').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const card = btn.closest('.section-card');
+                if (!card) return;
+                const title = card.getAttribute('data-section-title') || '';
+                const lines = [];
+
+                if (title) {
+                    lines.push(title.toUpperCase());
+                    lines.push('');
+                }
+
+                exportLinesFromCard(card).forEach(function (l) {
+                    // remove markdown heading markers for clipboard copy
+                    lines.push(l.replace(/^##\s+/, ''));
+                });
+
+                const text = lines.join('\n').trim();
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).catch(function () {});
+                } else {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    textarea.style.position = 'fixed';
+                    textarea.style.top = '-1000px';
+                    document.body.appendChild(textarea);
+                    textarea.focus();
+                    textarea.select();
+                    try {
+                        document.execCommand('copy');
+                    } catch (e) {}
+                    document.body.removeChild(textarea);
+                }
+            });
+        });
+    })();
+</script>
 
 </body>
 </html>
