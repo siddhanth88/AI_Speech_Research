@@ -164,6 +164,20 @@
             flex-wrap: wrap;
         }
 
+        /* Text-hiding class: keeps structure, hides textual content */
+        .text-content {
+            display: none;
+        }
+
+        /* Audio-only mode: hide all text sections (keep in HTML) */
+        .section-card[data-section-title="Central Thesis"],
+        .section-card[data-section-title="Estimate & Valuation Reset"],
+        .section-card[data-section-title="Structural & Execution Risk"],
+        .section-card[data-section-title="Market Vulnerability Assessment"],
+        .section-card[data-section-title="Strategic Investment Stance"] {
+            display: none;
+        }
+
         .secondary-button {
             background-color: #e5e7eb;
             color: #111827;
@@ -214,6 +228,28 @@
 <div class="container">
 
     <h1>📊 Research Market Outlook Analyzer</h1>
+
+    {% if data %}
+    <div class="section-card" data-section-title="Audio Summary">
+        <div class="section-title">🔊 Audio Summary</div>
+        <span class="badge">gTTS – UK English Voice</span>
+        <div class="section-actions">
+            <button type="button" class="secondary-button copy-section">Copy Section</button>
+        </div>
+        <div class="text-content">
+            <p class="export-text" style="margin:0 0 12px 0; line-height:1.7; color:#111827;">{{ data.audio_script }}</p>
+        </div>
+
+        {% if audio %}
+        <audio controls preload="auto" style="margin-top:10px; width:100%;">
+            <source src="{{ audio }}" type="audio/mpeg">
+            Your browser does not support the audio element.
+        </audio>
+        {% else %}
+        <p style="margin:0; font-size:14px; color:#4b5563;">Audio could not be generated for this file.</p>
+        {% endif %}
+    </div>
+    {% endif %}
 
     <div class="upload-card">
         <form id="upload-form" method="POST" enctype="multipart/form-data">
@@ -279,7 +315,9 @@
         <div class="section-actions">
             <button type="button" class="secondary-button copy-section">Copy Section</button>
         </div>
-        <p class="export-text" style="margin:0; line-height:1.7; color:#111827;">{{ data.central_thesis }}</p>
+        <div class="text-content">
+            <p class="export-text" style="margin:0; line-height:1.7; color:#111827;">{{ data.central_thesis }}</p>
+        </div>
     </div>
     {% endif %}
 
@@ -291,11 +329,13 @@
         <div class="section-actions">
             <button type="button" class="secondary-button copy-section">Copy Section</button>
         </div>
-        <ul>
-            {% for item in data.estimate_valuation_reset %}
-                <li>{{ item }}</li>
-            {% endfor %}
-        </ul>
+        <div class="text-content">
+            <ul>
+                {% for item in data.estimate_valuation_reset %}
+                    <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </div>
     </div>
     {% endif %}
 
@@ -307,11 +347,13 @@
         <div class="section-actions">
             <button type="button" class="secondary-button copy-section">Copy Section</button>
         </div>
-        <ul>
-            {% for item in data.structural_execution_risk %}
-                <li>{{ item }}</li>
-            {% endfor %}
-        </ul>
+        <div class="text-content">
+            <ul>
+                {% for item in data.structural_execution_risk %}
+                    <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </div>
     </div>
     {% endif %}
 
@@ -323,12 +365,14 @@
         <div class="section-actions">
             <button type="button" class="secondary-button copy-section">Copy Section</button>
         </div>
-        <ul>
-            <li><strong>Earnings Risk Level</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.earnings_risk_level }}</span></li>
-            <li><strong>Valuation Compression Risk</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.valuation_compression_risk }}</span></li>
-            <li><strong>Flow Sensitivity Risk</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.flow_sensitivity_risk }}</span></li>
-            <li><strong>Overall Vulnerability Score</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.overall_vulnerability_score }}/10</span></li>
-        </ul>
+        <div class="text-content">
+            <ul>
+                <li><strong>Earnings Risk Level</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.earnings_risk_level }}</span></li>
+                <li><strong>Valuation Compression Risk</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.valuation_compression_risk }}</span></li>
+                <li><strong>Flow Sensitivity Risk</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.flow_sensitivity_risk }}</span></li>
+                <li><strong>Overall Vulnerability Score</strong>: <span class="export-text">{{ data.market_vulnerability_assessment.overall_vulnerability_score }}/10</span></li>
+            </ul>
+        </div>
     </div>
     {% endif %}
 
@@ -340,22 +384,9 @@
         <div class="section-actions">
             <button type="button" class="secondary-button copy-section">Copy Section</button>
         </div>
-        <p class="export-text" style="margin:0; line-height:1.7; color:#111827;">{{ data.strategic_investment_stance }}</p>
-    </div>
-    {% endif %}
-
-    {% if audio %}
-    <div class="section-card" data-section-title="Audio Ready Script (Narration)">
-        <div class="section-title">🔊 Audio Summary</div>
-        <span class="badge">gTTS – UK English Voice</span>
-        <div class="section-actions">
-            <button type="button" class="secondary-button copy-section">Copy Section</button>
+        <div class="text-content">
+            <p class="export-text" style="margin:0; line-height:1.7; color:#111827;">{{ data.strategic_investment_stance }}</p>
         </div>
-        <p class="export-text" style="margin:0 0 12px 0; line-height:1.7; color:#111827;">{{ data.audio_script }}</p>
-        <audio controls style="margin-top:10px; width:100%;">
-            <source src="{{ audio }}" type="audio/mpeg">
-            Your browser does not support the audio element.
-        </audio>
     </div>
     {% endif %}
 
