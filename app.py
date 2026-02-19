@@ -355,8 +355,7 @@ Return ONLY valid JSON with this exact structure and nothing else:
     "flow_sensitivity_risk": "Low|Moderate|High",
     "overall_vulnerability_score": 0
   },
-  "strategic_investment_stance": "2-3 sentences",
-  "audio_script": "Audio-ready script (<= ~2.5 minutes) that narrates the full briefing in a natural institutional tone."
+  "strategic_investment_stance": "2-3 sentences"
 }
 
 If a field lacks material report-backed content, keep it short/blank rather than filling with generic language.
@@ -461,45 +460,184 @@ If a field lacks material report-backed content, keep it short/blank rather than
         str(data.get("strategic_investment_stance", "") or "")
     )
 
-    audio_script = data.get("audio_script", "")
-    if isinstance(audio_script, list):
-        audio_script = " ".join(str(x) for x in audio_script)
-    data["audio_script"] = _strip_index_names(str(audio_script or ""))
-
     return data
 
-def generate_market_outlook_audio(summary_dict):
+
+def generate_briefing_script(structured_data):
     """
-    Generate a spoken macro market outlook from the structured JSON output
-    using gTTS. This is tailored to the 5-section committee format.
+    Generate a dedicated 60–90 second institutional briefing script from the
+    structured research output. Uses a separate AI call. Audio duration is
+    independent of PDF length.
     """
-    # Prefer the model-crafted audio script when available
-    text = (summary_dict.get("audio_script") or "").strip()
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        return ""
 
-    # Fallback: build a script from bullets if audio_script is missing
-    if not text:
-        sections_order = [
-            ("market_outlook_executive", "Executive earnings and valuation view."),
-            ("positive_drivers", "Key positive drivers for earnings and valuation."),
-            ("key_risks", "Key risks to earnings, margins, and valuation."),
-            ("what_matters_most", "What matters most and could change the base case."),
-            ("strategic_conclusion", "Strategic conclusion and stance."),
-        ]
+    # Build full structured context for the prompt
+    parts = []
+    if structured_data.get("central_thesis"):
+        parts.append("Central Thesis: " + str(structured_data["central_thesis"]))
+    if structured_data.get("estimate_valuation_reset"):
+        parts.append("Estimate & Valuation Reset:\n" + "\n".join("- " + str(x) for x in structured_data["estimate_valuation_reset"]))
+    if structured_data.get("structural_execution_risk"):
+        parts.append("Structural & Execution Risk:\n" + "\n".join("- " + str(x) for x in structured_data["structural_execution_risk"]))
+    mva = structured_data.get("market_vulnerability_assessment") or {}
+    if mva:
+        parts.append(
+            "Market Vulnerability: "
+            + f"Earnings {mva.get('earnings_risk_level', '')}, "
+            + f"Valuation {mva.get('valuation_compression_risk', '')}, "
+            + f"Flow {mva.get('flow_sensitivity_risk', '')}, "
+            + f"Score {mva.get('overall_vulnerability_score', '')}/10"
+        )
+    if structured_data.get("strategic_investment_stance"):
+        parts.append("Strategic Stance: " + str(structured_data["strategic_investment_stance"]))
 
-        parts = [
-            "Here is a concise, valuation-focused research summary for the investment committee."
-        ]
+    context = "\n\n".join(parts) if parts else "No structured content."
 
-        for key, heading in sections_order:
-            items = summary_dict.get(key) or []
-            if not items:
+    base_prompt = (
+        "Convert the structured market outlook below into a professional institutional fund manager briefing suitable for a morning strategy call.\n"
+        "Requirements:\n"
+        "200–260 words (MANDATORY)\n"
+        "Target duration: 90–120 seconds when spoken\n"
+        "Professional institutional tone\n"
+        "Do NOT start with greetings such as 'Good morning' or 'Good evening' — start directly with the main point.\n"
+        "No bullet points\n"
+        "No repetition\n"
+        "Do not read sections mechanically\n"
+        "Synthesize insights into a coherent narrative\n"
+        "Include macro view, earnings reset, risk assessment, and positioning\n"
+        "End with a clear strategic investment stance\n"
+        "This must sound like a sell-side strategist briefing institutional clients.\n\n"
+        "Structured market outlook:\n"
+        f"{context}"
+    )
+
+    def _call_api(prompt_text):
+        payload = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "user", "content": prompt_text},
+            ],
+            "temperature": 0.3,
+        }
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+
+    def _word_count(s):
+        return len(re.findall(r"\b\w+\b", s or ""))
+
+    def _trim_to_word_range(s, min_words=200, target_low=230, target_high=260, hard_max=280):
+        """
+        Trim at sentence boundaries to land near 280–300 words.
+        If still too long, hard-trim by words.
+        """
+        s = (s or "").strip()
+        if not s:
+            return s
+
+        wc = _word_count(s)
+        if wc <= target_high:
+            return s
+
+        # Sentence-based trim
+        sentences = re.split(r"(?<=[.!?])\s+", s)
+        kept = []
+        kept_wc = 0
+        for sent in sentences:
+            sent = sent.strip()
+            if not sent:
                 continue
-            parts.append(heading)
-            # Keep audio concise: at most 6 bullets per section
-            for bullet in items[:6]:
-                parts.append(bullet)
+            sent_wc = _word_count(sent)
+            if kept_wc + sent_wc > target_high:
+                # Stop once we would exceed target_high
+                break
+            kept.append(sent)
+            kept_wc += sent_wc
 
-        text = " ".join(parts)
+        trimmed = " ".join(kept).strip()
+        if _word_count(trimmed) >= min_words:
+            return trimmed
+
+        # If sentence trim got too short, allow going up to hard_max
+        kept = []
+        kept_wc = 0
+        for sent in sentences:
+            sent = sent.strip()
+            if not sent:
+                continue
+            sent_wc = _word_count(sent)
+            if kept_wc + sent_wc > hard_max:
+                break
+            kept.append(sent)
+            kept_wc += sent_wc
+        trimmed = " ".join(kept).strip()
+
+        # If still above target_high, hard-trim by words to target_high
+        words = re.findall(r"\S+", trimmed)
+        if len(words) > target_high:
+            trimmed = " ".join(words[:target_high]).rstrip()
+            # try to end on sentence punctuation if possible
+            last_punct = max(trimmed.rfind("."), trimmed.rfind("?"), trimmed.rfind("!"))
+            if last_punct > 0:
+                trimmed = trimmed[: last_punct + 1]
+        return trimmed
+
+    script = ""
+    try:
+        script = _call_api(base_prompt)
+    except Exception as exc:
+        print(f"Briefing script API error: {exc}")
+        return ""
+
+    wc = _word_count(script)
+    print(f"Briefing script word count (initial): {wc}")
+
+    # If < 200 words → regenerate once with expansion instruction
+    if wc < 200:
+        try:
+            script = _call_api(
+                base_prompt
+                + "\n\nExpand with deeper institutional reasoning and macro context. Maintain professionalism."
+            )
+        except Exception as exc:
+            print(f"Briefing script retry error: {exc}")
+        wc = _word_count(script)
+        print(f"Briefing script word count (after expand retry): {wc}")
+
+    # If > 280 words → trim near 230–260 at sentence boundary
+    if wc > 280:
+        script = _trim_to_word_range(script, min_words=200, target_low=230, target_high=260, hard_max=280)
+        wc = _word_count(script)
+        print(f"Briefing script word count (after trim): {wc}")
+
+    # Enforce the mandatory 200–260 target when possible:
+    # - If slightly above 260, trim down to <= 260
+    if wc > 260:
+        script = _trim_to_word_range(script, min_words=200, target_low=230, target_high=260, hard_max=260)
+        wc = _word_count(script)
+        print(f"Briefing script word count (final enforce): {wc}")
+
+    return script
+
+
+def generate_market_outlook_audio(script_text):
+    """
+    Generate audio from the dedicated 60–90 second institutional briefing script.
+    Uses ONLY the script text for gTTS. No executive summary or bullet text.
+    """
+    text = (script_text or "").strip()
+    if not text:
+        return None
+
+    wc = len(re.findall(r"\b\w+\b", text))
+    print(f"Briefing script word count (pre-TTS): {wc}")
 
     # Clean a few symbols so TTS sounds natural
     text = text.replace("%", " percent ")
@@ -551,10 +689,12 @@ def index():
             # Use LLM to generate the macro Market Outlook structure
             data = generate_market_outlook_summary(raw_text)
 
-            # Generate audio if we got any bullets back
+            # Generate dedicated 60–90 sec briefing script (separate AI call), then audio
             if data:
                 try:
-                    audio_file = generate_market_outlook_audio(data)
+                    script = generate_briefing_script(data)
+                    data["audio_script"] = script
+                    audio_file = generate_market_outlook_audio(script)
                 except Exception as exc:
                     print(f"Failed to generate audio: {exc}")
             
