@@ -1,4 +1,3 @@
-import gc
 import os
 import re
 import json
@@ -68,12 +67,8 @@ def build_strategy_evidence(text):
     """
     Scan the entire extracted PDF text and build a compact, high-signal evidence
     set for the LLM. This avoids token overruns while still reflecting the full
-    document. Input is capped for low-memory environments (e.g. Render free tier).
+    document.
     """
-    # Cap input size to reduce memory use on constrained hosts
-    max_input_chars = 45000
-    if len(text) > max_input_chars:
-        text = text[:max_input_chars]
     # Normalize whitespace early
     text = re.sub(r"\s+", " ", text).strip()
 
@@ -122,7 +117,8 @@ def build_strategy_evidence(text):
             continue
         seen.add(key)
         picked.append(s)
-        if len(picked) >= 90:
+        # Cap evidence to keep token usage low for Render free tier
+        if len(picked) >= 80:
             break
 
     # If the doc is sparse, fall back to the first portion so we still have context
@@ -678,6 +674,20 @@ def index():
             
             if not allowed_file(pdf.filename):
                 return render_template("index.html", error="Only PDF files allowed")
+
+            # Basic size guard to avoid OOM/timeouts on Render free tier
+            try:
+                pdf.stream.seek(0, os.SEEK_END)
+                size_bytes = pdf.stream.tell()
+                pdf.stream.seek(0)
+                if size_bytes > 10 * 1024 * 1024:  # 10 MB limit
+                    return render_template(
+                        "index.html",
+                        error="PDF too large for this environment. Please upload a file under 10 MB."
+                    )
+            except Exception:
+                # If we cannot determine size, continue but rely on other limits
+                pass
             
             # Save PDF
             filename = secure_filename(pdf.filename)
@@ -687,18 +697,12 @@ def index():
             
             print(f"📄 Processing: {filename}")
             
-            # Extract and analyze (cap size for low-memory hosts e.g. Render)
+            # Extract and analyze
             raw_text = extract_pdf_text(pdf_path)
             print(f"📝 Extracted {len(raw_text)} characters from PDF")
-            max_chars = 55000
-            if len(raw_text) > max_chars:
-                raw_text = raw_text[:max_chars]
-                print(f"📝 Capped to {max_chars} characters for stability")
 
             # Use LLM to generate the macro Market Outlook structure
             data = generate_market_outlook_summary(raw_text)
-            del raw_text
-            gc.collect()
 
             # Generate dedicated 60–90 sec briefing script (separate AI call), then audio
             if data:
@@ -730,12 +734,12 @@ def test():
 
 if __name__ == "__main__":
     print("="*60)
-    print("📊 Research Paper Analyzer - IMPROVED VERSION")
+    print("Research Paper Analyzer - IMPROVED VERSION")
     print("="*60)
-    print("✅ Processes ALL pages (not just 70%)")
-    print("✅ Less aggressive filtering")
-    print("✅ More categories for better organization")
-    print("✅ Captures up to 15 items per category")
+    print("Processes ALL pages (not just 70%)")
+    print("Less aggressive filtering")
+    print("More categories for better organization")
+    print("Captures up to 15 items per category")
     print("="*60)
     
     port = int(os.environ.get('PORT', 5000))
