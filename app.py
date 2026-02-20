@@ -1,3 +1,4 @@
+import gc
 import os
 import re
 import json
@@ -67,8 +68,12 @@ def build_strategy_evidence(text):
     """
     Scan the entire extracted PDF text and build a compact, high-signal evidence
     set for the LLM. This avoids token overruns while still reflecting the full
-    document.
+    document. Input is capped for low-memory environments (e.g. Render free tier).
     """
+    # Cap input size to reduce memory use on constrained hosts
+    max_input_chars = 45000
+    if len(text) > max_input_chars:
+        text = text[:max_input_chars]
     # Normalize whitespace early
     text = re.sub(r"\s+", " ", text).strip()
 
@@ -117,7 +122,7 @@ def build_strategy_evidence(text):
             continue
         seen.add(key)
         picked.append(s)
-        if len(picked) >= 140:
+        if len(picked) >= 90:
             break
 
     # If the doc is sparse, fall back to the first portion so we still have context
@@ -682,12 +687,18 @@ def index():
             
             print(f"📄 Processing: {filename}")
             
-            # Extract and analyze
+            # Extract and analyze (cap size for low-memory hosts e.g. Render)
             raw_text = extract_pdf_text(pdf_path)
             print(f"📝 Extracted {len(raw_text)} characters from PDF")
+            max_chars = 55000
+            if len(raw_text) > max_chars:
+                raw_text = raw_text[:max_chars]
+                print(f"📝 Capped to {max_chars} characters for stability")
 
             # Use LLM to generate the macro Market Outlook structure
             data = generate_market_outlook_summary(raw_text)
+            del raw_text
+            gc.collect()
 
             # Generate dedicated 60–90 sec briefing script (separate AI call), then audio
             if data:
