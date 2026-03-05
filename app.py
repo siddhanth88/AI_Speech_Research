@@ -698,14 +698,16 @@ def index():
             print(f"📄 Processing: {filename}")
             
             # Extract and analyze
-            try:raw_text = extract_pdf_text(pdf_path)
-                print(f"📝 Extracted {len(raw_text)} characters from PDF")
+            try: raw_text = extract_pdf_text(pdf_path)
+            print(f"📝 Extracted {len(raw_text)} characters from PDF")
             # Prevent very large PDFs breaking Groq limits
-    MAX_CHARS = 60000
-    if len(raw_text) > MAX_CHARS:
-        raw_text = raw_text[:MAX_CHARS]
+MAX_CHARS = 60000
+if len(raw_text) > MAX_CHARS:
+    raw_text = raw_text[:MAX_CHARS]
+
 except Exception as e:
-    print("PDF extraction error:", e)
+    print("❌ PDF extraction error:", e)
+    return "Error extracting PDF"
 
             # Use LLM to generate the macro Market Outlook structure
             data = generate_market_outlook_summary(raw_text)
